@@ -174,7 +174,7 @@ TOOL RULES:
 """
 
 model = genai.GenerativeModel(
-    'gemini-2.5-flash', 
+    'gemini-3-flash', 
     tools=[fetch_gsc_data], 
     system_instruction=sys_instruct
 )
