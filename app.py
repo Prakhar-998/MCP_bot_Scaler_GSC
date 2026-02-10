@@ -79,27 +79,46 @@ except Exception as e:
     st.stop()
 
 # --- 3. THE BACKEND LOGIC (Cached for Speed) ---
-@st.cache_data(ttl=3600) # Cache data for 1 hour to save API quota
-def fetch_gsc_data(days_ago, dimension, limit, filter_country=None, filter_page=None):
-    """The Core Logic from your server.py, adapted for Streamlit"""
+@st.cache_data(ttl=3600)
+def fetch_gsc_data(days_ago=None, start_date=None, end_date=None, dimension="query", limit=10, filter_country=None, filter_page=None):
+    """
+    Fetches GSC data. 
+    - Use 'days_ago' for relative dates (e.g., "last 7 days").
+    - Use 'start_date' + 'end_date' for specific ranges (YYYY-MM-DD).
+    """
     try:
+        # 1. SETUP CREDENTIALS
         creds = service_account.Credentials.from_service_account_info(
             json.loads(GSC_INFO), 
             scopes=['https://www.googleapis.com/auth/webmasters.readonly']
         )
         service = build('webmasters', 'v3', credentials=creds)
         
-        end_date = datetime.date.today()
-        start_date = end_date - datetime.timedelta(days=days_ago)
-        
+        # 2. DATE LOGIC (The Fix for "January 2025")
+        if start_date and end_date:
+            # If AI provides specific dates, use them directly
+            final_start = start_date
+            final_end = end_date
+        else:
+            # Default to relative "days ago" if no specific dates provided
+            # If days_ago is None, default to 7 days to prevent errors
+            days_count = int(days_ago) if days_ago else 7
+            
+            date_end = datetime.date.today()
+            date_start = date_end - datetime.timedelta(days=days_count)
+            final_start = date_start.isoformat()
+            final_end = date_end.isoformat()
+
+        # 3. BUILD REQUEST
         request = {
-            'startDate': start_date.isoformat(),
-            'endDate': end_date.isoformat(),
+            'startDate': final_start,
+            'endDate': final_end,
             'dimensions': [dimension],
             'rowLimit': limit,
             'dimensionFilterGroups': []
         }
         
+        # Add Filters
         filters = []
         if filter_country:
             filters.append({'dimension': 'country', 'operator': 'equals', 'expression': filter_country.upper()})
@@ -109,28 +128,56 @@ def fetch_gsc_data(days_ago, dimension, limit, filter_country=None, filter_page=
         if filters:
             request['dimensionFilterGroups'].append({'filters': filters})
 
+        # 4. EXECUTE QUERY
         response = service.searchanalytics().query(
             siteUrl='sc-domain:scaler.com', 
             body=request
         ).execute()
         
-        return response.get('rows', [])
-    except Exception as e:
-        return str(e)
+        rows = response.get('rows', [])
+        
+        if not rows:
+            return "No data found for this period."
 
-# 4. THE BRAIN (Updated for Gemini 2.5)
+        # 5. MINIFY OUTPUT (Save Tokens!)
+        # Converts heavy JSON into light CSV format
+        output = []
+        header = f"{dimension},clicks,impressions,ctr,position"
+        output.append(header)
+        
+        for row in rows:
+            # 'keys' is always a list, we take the first item
+            key_val = row['keys'][0]
+            # Remove commas from keywords to keep CSV clean
+            clean_key = str(key_val).replace(',', '') 
+            
+            line = f"{clean_key},{row['clicks']},{row['impressions']},{row['ctr']},{row['position']}"
+            output.append(line)
+            
+        return "\n".join(output)
+
+    except Exception as e:
+        return f"Error fetching GSC data: {str(e)}"
 # ==========================================
 # CRITICAL FIX: Pass the actual function 'fetch_gsc_data', NOT a dictionary.
 # This allows 'enable_automatic_function_calling' to actually execute the code.
 today_date = datetime.date.today().strftime("%Y-%m-%d")
+
 sys_instruct = f"""
 You are a technical SEO Analyst for Scaler. 
 TODAY'S DATE is {today_date}.
-When a user asks for a specific date (e.g., "January 2025"), YOU must calculate how many 'days_ago' that was relative to {today_date} and use the tool.
-Do not ask the user to calculate days. Do it yourself.
-"""
-model = genai.GenerativeModel('gemini-2.5-flash', tools=[fetch_gsc_data], system_instruction=sys_instruct)
 
+TOOL RULES:
+1. If the user asks for a SPECIFIC DATE RANGE (e.g., "January 2025" or "Dec 1st to Dec 10th"), calculate the 'start_date' and 'end_date' (YYYY-MM-DD) and pass them to the tool. Do NOT use 'days_ago'.
+2. If the user asks for a RELATIVE RANGE (e.g., "Last 7 days"), use 'days_ago'.
+3. Always analyze the returned CSV data to answer the user's question.
+"""
+
+model = genai.GenerativeModel(
+    'gemini-2.5-flash', 
+    tools=[fetch_gsc_data], 
+    system_instruction=sys_instruct
+)
 # ==========================================
 # ==========================================
 # 5. THE UI (Chat Interface)
