@@ -3,13 +3,14 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import datetime
 
-# Initialize the MCP Server
+# Initialize
 mcp = FastMCP("GSC-Manager-Bot")
 
+# ==========================================
 # CONFIGURATION
-# 1. The ID of the GSC property (usually the full URL)
-SITE_URL = 'https://www.scaler.com/'  
-# 2. Your JSON key file path
+# ==========================================
+# Make sure this is 'sc-domain:scaler.com'
+SITE_URL = 'sc-domain:scaler.com'  
 KEY_FILE_LOCATION = 'service_account.json' 
 SCOPES = ['https://www.googleapis.com/auth/webmasters.readonly']
 
@@ -20,45 +21,65 @@ def get_gsc_service():
             KEY_FILE_LOCATION, scopes=SCOPES)
         return build('webmasters', 'v3', credentials=creds)
     except Exception as e:
-        raise RuntimeError(f"Authentication failed. Check your JSON key file: {e}")
+        raise RuntimeError(f"Authentication failed: {e}")
 
 @mcp.tool()
-def get_search_analytics(days_ago: int = 7, dimension: str = 'query', country_code: str = None) -> str:
+def get_search_analytics(
+    days_ago: int = 7, 
+    dimension: str = 'query', 
+    limit: int = 10,
+    filter_country: str = None,
+    filter_page_contains: str = None
+) -> str:
     """
-    Queries Google Search Console analytics for Scaler.com.
+    Advanced GSC Analytics Tool.
     
     Args:
-        days_ago: How many days of data to look back (default 7).
-        dimension: What to group by. Options: 'query', 'page', 'country', 'device'.
-        country_code: Optional 3-letter country code (e.g., 'IND', 'USA', 'GBR') to filter results.
+        days_ago: Days to look back (default 7).
+        dimension: Group by 'query', 'page', 'country', 'device', or 'date'.
+        limit: Number of rows to return (default 10).
+        filter_country: Filter by 3-letter country code (e.g., 'IND', 'USA').
+        filter_page_contains: Filter URLs that contain this string (e.g., '/blog/').
     """
     service = get_gsc_service()
     
-    # Calculate dates: End date is today (API handles the lag automatically)
+    # Date Logic
     end_date = datetime.date.today()
     start_date = end_date - datetime.timedelta(days=days_ago)
     
-    # Base Request
+    # 1. Base Request
     request = {
         'startDate': start_date.isoformat(),
         'endDate': end_date.isoformat(),
         'dimensions': [dimension], 
-        'rowLimit': 10,
-        'dimensionFilterGroups': [] # Prepared list for filters
+        'rowLimit': limit,
+        'dimensionFilterGroups': []
     }
+
+    # 2. Dynamic Filtering
+    filters = []
     
-    # Add Country Filter if requested
-    if country_code:
-        request['dimensionFilterGroups'].append({
-            'filters': [{
-                'dimension': 'country',
-                'operator': 'equals',
-                'expression': country_code.upper()
-            }]
+    # Country Filter
+    if filter_country:
+        filters.append({
+            'dimension': 'country',
+            'operator': 'equals',
+            'expression': filter_country.upper()
         })
-    
+        
+    # Page URL Filter (New!)
+    if filter_page_contains:
+        filters.append({
+            'dimension': 'page',
+            'operator': 'contains',
+            'expression': filter_page_contains
+        })
+
+    if filters:
+        request['dimensionFilterGroups'].append({'filters': filters})
+
     try:
-        print(f"DEBUG: Fetching data for {dimension} from {start_date} to {end_date}...")
+        print(f"DEBUG: Querying {dimension} | Limit: {limit} | Filters: {filters}")
         response = service.searchanalytics().query(
             siteUrl=SITE_URL, 
             body=request
@@ -67,31 +88,32 @@ def get_search_analytics(days_ago: int = 7, dimension: str = 'query', country_co
         rows = response.get('rows', [])
         
         if not rows:
-            return f"No data found for the last {days_ago} days."
+            return f"No data found for {dimension} in the last {days_ago} days."
             
-        # NEW: Markdown Table Formatting
-        result_text = f"### GSC Data for {SITE_URL} (Last {days_ago} days)\n"
-        if country_code:
-            result_text += f"**Filter:** Country = {country_code.upper()}\n"
-            
-        result_text += "\n| Dimension | Clicks | Impressions | CTR | Position |\n"
+        # 3. Formatted Output (Markdown Table)
+        result_text = f"### Top {limit} {dimension}s (Last {days_ago} days)\n"
+        if filter_country: result_text += f"- **Country:** {filter_country}\n"
+        if filter_page_contains: result_text += f"- **URL Pattern:** '{filter_page_contains}'\n"
+        
+        result_text += "\n| Key | Clicks | Impressions | CTR | Position |\n"
         result_text += "| :--- | :--- | :--- | :--- | :--- |\n"
         
         for row in rows:
-            key = row['keys'][0] # The query, page, or country name
+            key = row['keys'][0]
+            # If grouping by page, shorten the URL for readability
+            if dimension == 'page':
+                key = key.replace("https://www.scaler.com", "") or "/"
+                
             clicks = row['clicks']
             impressions = row['impressions']
             ctr = row['ctr']
-            position = row['position']
-            
-            # Add row to table
-            result_text += f"| {key} | {clicks} | {impressions} | {ctr:.1%} | {position:.1f} |\n"
+            pos = row['position']
+            result_text += f"| {key} | {clicks} | {impressions} | {ctr:.1%} | {pos:.1f} |\n"
             
         return result_text
 
     except Exception as e:
-        # This is where we will see the permission error if manager hasn't added the user yet
-        return f"Error querying GSC: {str(e)}"
+        return f"Error: {str(e)}"
 
 if __name__ == "__main__":
     mcp.run()

@@ -30,7 +30,7 @@ async def run_chat_test():
                 # We call the tool with the arguments we defined in server.py
                 result = await session.call_tool(
                     "get_search_analytics",
-                    arguments={"days_ago": 5, "dimension": "query"}
+                    arguments={"days_ago": 30, "limit": 5,"dimension": "query", "country_code": "IND","filter_page_contains": "data-science"}
                 )
                 
                 # 4. Print the result
