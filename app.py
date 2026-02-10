@@ -6,6 +6,45 @@ import datetime
 import json
 import pandas as pd
 
+# ... other imports ...
+
+# ---------------------------------------------------------
+# 1. GATEKEEPER (MUST BE FIRST)
+# ---------------------------------------------------------
+def check_password():
+    """Returns `True` if the user had the correct password."""
+    
+    # Initialize state
+    if "password_correct" not in st.session_state:
+        st.session_state.password_correct = False
+
+    # If already correct, return True immediately
+    if st.session_state.password_correct:
+        return True
+
+    # Show input for password
+    st.text_input(
+        "Enter Password", 
+        type="password", 
+        on_change=password_entered, 
+        key="password_input"
+    )
+    return False
+
+def password_entered():
+    """Checks whether a password entered by the user is correct."""
+    if st.session_state["password_input"] == st.secrets["APP_PASSWORD"]:
+        st.session_state.password_correct = True
+        del st.session_state["password_input"]  # Clean up
+    else:
+        st.session_state.password_correct = False
+        st.error("😕 Password incorrect")
+
+# EXECUTE THE CHECK
+if not check_password():
+    st.stop()  # <--- THIS IS CRITICAL. It stops the rest of the file from running!
+
+
 # --- 1. CONFIGURATION & STYLE ---
 st.set_page_config(
     page_title="Scaler SEO Intelligence",
