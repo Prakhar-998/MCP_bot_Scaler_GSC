@@ -5,6 +5,7 @@ from googleapiclient.discovery import build
 import datetime
 import json
 import pandas as pd
+import datetime
 
 # ... other imports ...
 
@@ -121,55 +122,85 @@ def fetch_gsc_data(days_ago, dimension, limit, filter_country=None, filter_page=
 # ==========================================
 # CRITICAL FIX: Pass the actual function 'fetch_gsc_data', NOT a dictionary.
 # This allows 'enable_automatic_function_calling' to actually execute the code.
-model = genai.GenerativeModel('gemini-2.5-flash', tools=[fetch_gsc_data])
+today_date = datetime.date.today().strftime("%Y-%m-%d")
+sys_instruct = f"""
+You are a technical SEO Analyst for Scaler. 
+TODAY'S DATE is {today_date}.
+When a user asks for a specific date (e.g., "January 2025"), YOU must calculate how many 'days_ago' that was relative to {today_date} and use the tool.
+Do not ask the user to calculate days. Do it yourself.
+"""
+model = genai.GenerativeModel('gemini-2.5-flash', tools=[fetch_gsc_data], system_instruction=sys_instruct)
 
+# ==========================================
 # ==========================================
 # 5. THE UI (Chat Interface)
 # ==========================================
+
+# Initialize chat history if empty
 if "messages" not in st.session_state:
     st.session_state.messages = []
     st.session_state.messages.append({"role": "assistant", "content": "Hello! I'm connected to Scaler's GSC. Ask me about traffic, queries, or pages."})
 
-# Sidebar
+# ---------------------------------------------------------
+# SIDEBAR (Quick Actions)
+# ---------------------------------------------------------
 with st.sidebar:
     st.header("⚡ Quick Actions")
+    
+    # Button 1: Traffic Overview
     if st.button("🇮🇳 India Performance (7 Days)"):
         st.session_state.prompt_trigger = "How is our organic traffic in India over the last 7 days?"
     
+    # Button 2: Top Queries
+    if st.button("🔍 Top 10 Queries (Global)"):
+        st.session_state.prompt_trigger = "List the top 10 queries by clicks for the last 7 days globally."
+        
     st.divider()
+    
+    # System Status Indicator
+    st.caption(f"📅 System Date: {today_date}")
     st.success("System: Online ✅")
+    
+    # Clear History Button (Useful for debugging)
+    if st.button("🗑️ Clear Chat"):
+        st.session_state.messages = []
+        st.rerun()
 
-# Chat Logic
+# ---------------------------------------------------------
+# MAIN CHAT LOGIC
+# ---------------------------------------------------------
+
+# 1. Display existing chat history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
+# 2. Handle User Input
 user_input = st.chat_input("Ask a question...")
 
-# Handle Sidebar Button Trigger
+# 3. Handle Sidebar Button Triggers
 if "prompt_trigger" in st.session_state:
     user_input = st.session_state.prompt_trigger
     del st.session_state.prompt_trigger
 
+# 4. Process the Request
 if user_input:
+    # Add user message to UI
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
+    # Generate Response
     with st.chat_message("assistant"):
         with st.spinner("Analyzing GSC data..."):
             try:
-                # Initialize chat with automatic execution enabled
+                # Initialize chat with automatic function calling enabled
                 chat = model.start_chat(enable_automatic_function_calling=True)
                 
-                # Send the message
-                # The SDK will now:
-                # 1. See the tool call
-                # 2. EXECUTE your 'fetch_gsc_data' function automatically
-                # 3. Get the data and send it back to Gemini
-                # 4. Return the final text answer here
+                # Send message to Gemini
                 response = chat.send_message(user_input)
                 
+                # Display response
                 st.markdown(response.text)
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
                 
