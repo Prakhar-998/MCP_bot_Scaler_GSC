@@ -139,7 +139,7 @@ TOOL RULES:
 """
 
 model = genai.GenerativeModel(
-    'gemini-3-flash', 
+    'gemini-3-flash-preview', 
     tools=[fetch_gsc_data], 
     system_instruction=sys_instruct
 )
